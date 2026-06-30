@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="../EOLTest.TestUnit/EOLTest.TestUnit.csproj" Id="70d578e2-7351-4a73-b8d8-bd591a50be08" />
+  <Project Path="EOLTest.csproj" />
+</Solution>

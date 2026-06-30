@@ -1,0 +1,11 @@
+﻿<Application x:Class="EOLTest.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:EOLTest"
+             Startup="Application_Startup"
+             >
+    <!--原来的启动路径StartupUri="MainWindow.xaml"-->
+    <Application.Resources>
+         
+    </Application.Resources>
+</Application>
