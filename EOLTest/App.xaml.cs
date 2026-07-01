@@ -119,7 +119,16 @@ namespace EOLTest
 
             //注册VCI实例
             services.AddSingleton<APITester>();
-            services.AddSingleton<IVciControl, VciControlOuKe>();
+            //services.AddSingleton<IVciControl, VciControlOuKe>();
+            services.AddSingleton<VciControlOuKe>();   // 注册具体类（以供装饰器使用）
+            // 2. 注册装饰器作为 IVciControl 的实例
+            services.AddSingleton<IVciControl>(sp =>
+            {
+                // 手动创建原始实现，并注入 DataAggregator 和原始 VciControlOuKe
+                var inner = sp.GetRequiredService<VciControlOuKe>();
+                var dataAggregator = sp.GetRequiredService<DataAggregator>();
+                return new LoggedVciControl(inner, dataAggregator);
+            });
 
             services.AddSingleton<IControlUiService, ControlUiService>();
             services.AddSingleton<MainWindowViewModel>();
@@ -131,10 +140,6 @@ namespace EOLTest
 
         private void Application_Startup(object sender, StartupEventArgs e)
         {
-            // 记录系统启动日志
-            GlobalLogger.Information("========== 界面启动 ==========");
-            GlobalLogger.Information("程序版本: 1.0.0");
-            GlobalLogger.Information("启动时间: {Time}", DateTime.Now);
             // 先获取所有服务
             var mainWindow = Services.GetRequiredService<MainWindow>();
             var viewModel = Services.GetRequiredService<MainWindowViewModel>();
@@ -142,6 +147,11 @@ namespace EOLTest
             var logShowService = Services.GetRequiredService<ILogShowService>();
             // 手动设置DataContext
             mainWindow.DataContext = viewModel;
+
+            // 记录系统启动日志 程序版本是界面的日期版本
+            GlobalLogger.Information("========== 界面启动 ==========");
+            GlobalLogger.Information($"程序版本: {mainWindow.Title.Substring(mainWindow.Title.Length-8)}");
+
 
             // 如果是ControlUiService，设置MainWindow引用
             if (controlService is ControlUiService concreteService)

@@ -7,6 +7,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using EOLTest.API;
 using EOLTest.Models;
+using EOLTest.Services.Aggregators;
 using EOLTest.Services.Common;
 using EOLTest.Services.Mdb;
 using Serilog;
@@ -16,9 +17,7 @@ namespace EOLTest.Services.Function
     internal class DtcFunction : IFunction
     {
         private readonly IVciControl _vci;
-        private readonly ILogShowService _logshow;
-        private readonly IDiagnosticService _diagnostic;
-        private readonly ILogger _logger;
+        private readonly DataAggregator _data;        // 数据相关
 
         public string FunctionName => "DTC";
 
@@ -28,13 +27,10 @@ namespace EOLTest.Services.Function
         // ── DTC 读取结果集合（供 ViewModel 绑定到 UI） ──
         public ObservableCollection<EcuDtcResult> DtcResults { get; } = new ObservableCollection<EcuDtcResult>();
 
-        public DtcFunction(IVciControl vci, ILogShowService logshow,
-            IDiagnosticService diagnostic, ILogger logger = null)
+        public DtcFunction(IVciControl vci, DataAggregator dataService)
         {
             _vci = vci;
-            _logshow = logshow;
-            _diagnostic = diagnostic;
-            _logger = logger;
+            _data = dataService;
         }
 
         /// <summary>
@@ -52,7 +48,7 @@ namespace EOLTest.Services.Function
         {
             if (_currentVehicle == null)
             {
-                _logshow.AddLog("ERROR", "❌ DTC 功能未设置车辆信息");
+                _data.logshow.AddLog("ERROR", "❌ DTC 功能未设置车辆信息");
                 return false;
             }
 
@@ -68,7 +64,7 @@ namespace EOLTest.Services.Function
         {
             if (vehicle?.EcuModules == null || vehicle.EcuModules.Count == 0)
             {
-                _logshow.AddLog("WARN", "⚠️ 车辆没有 ECU 模块信息");
+                _data.logshow.AddLog("WARN", "⚠️ 车辆没有 ECU 模块信息");
                 return false;
             }
 
@@ -79,22 +75,22 @@ namespace EOLTest.Services.Function
             ApiResult result = await _vci.InitVciAsync();
             if (!result.Success)
             {
-                _logshow.AddLog("FAIL", "❌ VCI 初始化失败，无法读取 DTC");
-                _logger?.Error("VCI 初始化失败: {Message}", result.Message);
+                _data.logshow.AddLog("FAIL", "❌ VCI 初始化失败，无法读取 DTC");
+                _data.sysLogger?.Error("VCI 初始化失败: {Message}", result.Message);
                 return false;
             }
-            _logger?.Information("✅ VCI 初始化成功");
+            _data.sysLogger?.Information("✅ VCI 初始化成功");
 
             // 2. 遍历所有 ECU
             foreach (var ecu in vehicle.EcuModules)
             {
-                _logger?.Information($"── 正在读取 {ecu.EcuName} 故障码 ──");
+                _data.sysLogger?.Information($"── 正在读取 {ecu.EcuName} 故障码 ──");
 
                 // 2a. 从数据库查询该 ECU 的 CAN 通信 ID
-                var ecuId = await _diagnostic.GetEcuCanIdAsync(ecu.EcuName);
+                var ecuId = await _data.diagnostic.GetEcuCanIdAsync(ecu.EcuName);
                 if (ecuId == null)
                 {
-                    _logger?.Warning($"⚠️ 未找到 {ecu.EcuName} 的 CAN ID，跳过");
+                    _data.sysLogger?.Warning($"⚠️ 未找到 {ecu.EcuName} 的 CAN ID，跳过");
                     DtcResults.Add(new EcuDtcResult
                     {
                         EcuName = ecu.EcuName,
@@ -109,8 +105,8 @@ namespace EOLTest.Services.Function
                 result = await _vci.ConnectEcuAsync(ecuId.TxId, ecuId.RxId, ecuId.LinId);
                 if (!result.Success)
                 {
-                    _logshow.AddLog("FAIL", $"❌ 连接 {ecu.EcuName} 失败: {result.Message}");
-                    _logger?.Error($"❌ 连接 {ecu.EcuName} 失败", result.Message);
+                    _data.logshow.AddLog("FAIL", $"❌ 连接 {ecu.EcuName} 失败: {result.Message}");
+                    _data.sysLogger?.Error($"❌ 连接 {ecu.EcuName} 失败", result.Message);
                     DtcResults.Add(new EcuDtcResult
                     {
                         EcuName = ecu.EcuName,
@@ -120,7 +116,7 @@ namespace EOLTest.Services.Function
                     allSuccess = false;
                     continue;
                 }
-                _logger?.Information($"✅ 已连接 {ecu.EcuName}，过滤器ID：{result.Data}");
+                _data.sysLogger?.Information($"✅ 已连接 {ecu.EcuName}，过滤器ID：{result.Data}");
 
                 // 2c. 读取该 ECU 的 DTC（发送指令、接收、解析一体）
                 var dtcResult = await ReadDtcFromSingleEcu(ecu.EcuName, "190208");
@@ -137,7 +133,7 @@ namespace EOLTest.Services.Function
             .Where(r => r.Success)
             .SelectMany(r => r.DtcList)
             .Count(d => d.IsActive);
-            _logger?.Information(
+            _data.sysLogger?.Information(
                 $"DTC 读取完成: 总结果 {allSuccess}，{successCount}/{DtcResults.Count} ECU 成功，当前故障 {totalActive} 个");
 
             return allSuccess;
@@ -156,7 +152,7 @@ namespace EOLTest.Services.Function
             try
             {
                 // 发送命令
-                _logshow.AddLog("SEND", $"[{ecuName}] 发送: {command}");
+                //_data.logshow.AddLog("SEND", $"[{ecuName}] 发送: {command}");
                 ApiResult sendResult = await _vci.SendCanPhyAsync(command);
                 if (!sendResult.Success)
                 {
@@ -184,13 +180,13 @@ namespace EOLTest.Services.Function
                 {
                     result.Success = false;
                     result.ErrorMessage = "响应数据类型不匹配";
-                    _logger?.Error("[{EcuName}] 接收数据类型异常: {Type}", ecuName, recvResult.Data?.GetType());
+                    _data.sysLogger?.Error("[{EcuName}] 接收数据类型异常: {Type}", ecuName, recvResult.Data?.GetType());
                     return result;
                 }
 
                 // 记录原始数据（用于调试）
                 string hexString = DiagnosticUtils.ToHexString(fullFrame);
-                _logshow.AddLog("RECV", $"[{ecuName}] 收到全帧: {hexString}");
+                //_data.logshow.AddLog("RECV", $"[{ecuName}] 收到全帧: {hexString}");
 
                 // 解析报文
                 result = ParseDtcResponse(ecuName, fullFrame);
@@ -199,7 +195,7 @@ namespace EOLTest.Services.Function
             {
                 result.Success = false;
                 result.ErrorMessage = $"异常: {ex.Message}";
-                _logger?.Error(ex, "[{EcuName}] DTC 读取异常", ecuName);
+                _data.sysLogger?.Error(ex, "[{EcuName}] DTC 读取异常", ecuName);
             }
 
             return result;
@@ -241,7 +237,7 @@ private EcuDtcResult ParseDtcResponse(string ecuName, byte[] fullFrameData)
                         string desc = GetNrcDescription(nrc);
                         result.Success = false;
                         result.ErrorMessage = $"负响应 NRC=0x{nrc:X2} ({desc})";
-                        _logshow.AddLog("WARN", $"⚠️ [{ecuName}] 负响应: NRC=0x{nrc:X2} {desc}");
+                        _data.sysLogger?.Warning($"⚠️ [{ecuName}] 负响应: NRC=0x{nrc:X2} {desc}");
                     }
                     else
                     {
@@ -252,14 +248,14 @@ private EcuDtcResult ParseDtcResponse(string ecuName, byte[] fullFrameData)
                 }
                 // ── 2. 读取 DTCStatusAvailabilityMask（可选，用于日志） ──
                 byte mask = data[2];
-                _logshow.AddLog("INFO", $"[{ecuName}] DTCStatusAvailabilityMask = 0x{mask:X2}");
+                _data.sysLogger?.Information( $"[{ecuName}] DTCStatusAvailabilityMask = 0x{mask:X2}");
                 // ── 3. 计算 DTC 记录数（每记录 = 3 编码字节 + 1 状态字节 = 4 字节） ──
                 int payloadLength = data.Length - 3;          // 去掉 59 02 XX 三字节
                 const int recordSize = 4;                     // 3 字节编码 + 1 字节状态
-                int dtcCount = payloadLength / recordSize;    // ★ 不再读取假想的"数量字节"
+                int dtcCount = payloadLength / recordSize;    // 读取"数量字节"
                 if (payloadLength % recordSize != 0)
                 {
-                    _logshow.AddLog("WARN", $"[{ecuName}] 数据长度不规整（{payloadLength} 字节），" +
+                    _data.sysLogger?.Warning($"[{ecuName}] 数据长度不规整（{payloadLength} 字节），" +
                                              $"可能有 {dtcCount} 条完整记录 + 余数 {payloadLength % recordSize}");
                 }
                 result.DtcList.Clear();
@@ -267,7 +263,7 @@ private EcuDtcResult ParseDtcResponse(string ecuName, byte[] fullFrameData)
                 {
                     // 无故障码（如报文 59 02 4F）
                     result.Success = true;
-                    _logshow.AddLog("INFO", $"[{ecuName}] 无故障码");
+                    _data.sysLogger?.Information( $"[{ecuName}] 无故障码");
                     return result;
                 }
                 for (int i = 0; i < dtcCount; i++)
@@ -284,13 +280,13 @@ private EcuDtcResult ParseDtcResponse(string ecuName, byte[] fullFrameData)
                 result.Success = true;
                 int activeCount = result.DtcList.Count(d => d.IsActive);
                 int inactiveCount = dtcCount - activeCount;
-                _logshow.AddLog("INFO", $"[{ecuName}] 解析完成：{dtcCount} 个 DTC（当前 {activeCount}，历史 {inactiveCount}）");
+                _data.sysLogger?.Information($"[{ecuName}] 解析完成：{dtcCount} 个 DTC（当前 {activeCount}，历史 {inactiveCount}）");
             }
             catch (Exception ex)
             {
                 result.Success = false;
                 result.ErrorMessage = $"解析异常: {ex.Message}";
-                _logger?.Error(ex, "[{EcuName}] DTC 解析异常", ecuName);
+                _data.sysLogger?.Error(ex, "[{EcuName}] DTC 解析异常", ecuName);
             }
             return result;
         }

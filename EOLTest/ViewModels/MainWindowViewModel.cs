@@ -87,7 +87,7 @@ namespace EOLTest.ViewModels
             _controlUiService = controlUiService;
             _api = api;
             _data.sysLogger.Information("加载 MainWindowViewModel");
-            // 构造函数：尝试从Windows注册表自动加载J2534 DLL路径
+            // 构造函数 尝试从Windows注册表自动加载J2534 DLL路径
             RegistryKey Key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\PassThruSupport.04.04\Eucleia Intelligent Tech Inc. - wiScan T6");
             if (Key != null)
             {
@@ -343,7 +343,13 @@ namespace EOLTest.ViewModels
                             CurrentVehicle = new Vehicle();
                             return;
                         }
-                        
+                        finally
+                        {
+                            // 无论成功失败，检测完成后关闭车辆日志
+                            _data.loggerFactory.CloseLogger(_data.vehicleLogger);
+                            _data.vehicleLogger = null;
+                        }
+
                     }
 
                 }

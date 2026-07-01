@@ -8,7 +8,7 @@
         xmlns:vm="clr-namespace:EOLTest.ViewModels"
         xmlns:hc="https://handyorg.github.io/handycontrol"
         mc:Ignorable="d"
-        Title="EOL测试上位机" Height="600" Width="950"
+        Title="EOL测试上位机20260701" Height="600" Width="950"
         WindowState="Maximized"          
         Background="#ECF0F1" WindowStartupLocation="CenterScreen">
 

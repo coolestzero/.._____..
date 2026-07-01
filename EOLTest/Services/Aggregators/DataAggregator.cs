@@ -18,24 +18,26 @@ namespace EOLTest.Services.Aggregators
     {
         public ICarDataService carService { get; }  // 依赖接口
 
+        public IDiagnosticService diagnostic { get; }
+
         public VehicleLoggerFactory loggerFactory { get; }
         // 全局日志（用于系统级日志）
         public  ILogger sysLogger { get; }
-        // 当前车辆的日志（开始检测时创建，检测完关闭）
-        public ILogger vehicleLogger { get; set; }
+        // 当前车辆的日志（开始检测时创建，检测完关闭） 车辆日志由外部赋值，构造函数不注入
+        public ILogger? vehicleLogger { get; set; }
 
         public ILogShowService logshow { get; set; }
         public DataAggregator(
             ICarDataService _carService,
+            IDiagnosticService _diagnostic,
             VehicleLoggerFactory _loggerFactory,
             ILogger _sysLogger,
-            ILogger _vehicleLogger,
             ILogShowService _logshow)
         {
             carService = _carService;
+            diagnostic = _diagnostic;
             loggerFactory = _loggerFactory;
             sysLogger = _sysLogger;
-            vehicleLogger = _vehicleLogger;
             logshow = _logshow;
         }
     }
