@@ -167,6 +167,35 @@ namespace EOLTest.Services.Impl
             });
         }
 
+        // 在 VciControlOuKe 中添加（简单透传，真正的重试逻辑在 LoggedVciControl 装饰器中）
+        public async Task<ApiResult> SendAndWaitPhyAsync(string reqMsg,
+                                                          uint overallTimeoutMs = 20000,
+                                                          int maxRetries = 3,
+                                                          int sendToRecvDelayMs = 20)
+        {
+            // 基础实现：不处理78，不自动重试，仅封装一次收发流程
+            // 真正的重试和78处理由 LoggedVciControl 装饰器提供
+            return await Task.Run<ApiResult>(() =>
+            {
+                var sendResult = _api.SendPhysical(reqMsg);
+                if (!sendResult.Success) return sendResult;
+                return _api.ReceivePhysicalResponse();
+            });
+        }
+
+        public async Task<ApiResult> SendAndWaitFuncAsync(string reqMsg,
+                                                           uint overallTimeoutMs = 20000,
+                                                           int maxRetries = 3,
+                                                           int sendToRecvDelayMs = 20)
+        {
+            return await Task.Run<ApiResult>(() =>
+            {
+                var sendResult = _api.SendFunctional(reqMsg);
+                if (!sendResult.Success) return sendResult;
+                return _api.ReceiveFunctionalResponses(); 
+            });
+        }
+
         #endregion
 
         #region 周期性消息

@@ -71,5 +71,25 @@ namespace EOLTest.Services
         /// </summary>
         /// <returns></returns>
         Task<ApiResult> ReadVerAsync();
+
+        // <summary>
+        /// 物理寻址发送并等待最终响应（自动处理 78 pending、超时重试等）
+        /// </summary>
+        /// <param name="reqMsg">诊断请求十六进制字符串</param>
+        /// <param name="overallTimeoutMs">单次尝试的总超时（毫秒），默认 20000</param>
+        /// <param name="maxRetries">最大尝试次数（含第一次），默认 3</param>
+        /// <param name="sendToRecvDelayMs">发送后等待时间（毫秒），默认 20</param>
+        /// <returns>最终响应</returns>
+        Task<ApiResult> SendAndWaitPhyAsync(string reqMsg,
+                                            uint overallTimeoutMs = 20000,
+                                            int maxRetries = 3,
+                                            int sendToRecvDelayMs = 20);
+        /// <summary>
+        /// 功能寻址（单模块）发送并等待最终响应
+        /// </summary>
+        Task<ApiResult> SendAndWaitFuncAsync(string reqMsg,
+                                             uint overallTimeoutMs = 20000,
+                                             int maxRetries = 3,
+                                             int sendToRecvDelayMs = 20);
     }
 }
