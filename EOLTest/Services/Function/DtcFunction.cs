@@ -151,18 +151,9 @@ namespace EOLTest.Services.Function
 
             try
             {
-                // 发送命令
-                //_data.logshow.AddLog("SEND", $"[{ecuName}] 发送: {command}");
-                ApiResult sendResult = await _vci.SendCanPhyAsync(command);
-                if (!sendResult.Success)
-                {
-                    result.Success = false;
-                    result.ErrorMessage = $"发送失败: {sendResult.Message}";
-                    return result;
-                }
+                // 发送命令 接收响应
+                ApiResult recvResult = await _vci.SendAndWaitPhyAsync(command);
 
-                // 接收响应
-                ApiResult recvResult = await _vci.ReceiveAsync();
                 if (!recvResult.Success)
                 {
                     result.Success = false;

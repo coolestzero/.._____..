@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -77,15 +78,20 @@ namespace EOLTest.ViewModels
         [ObservableProperty]
         private int _selectedTabIndex = 0;   // 默认显示"运行日志"
 
+        //在线配置相关
+        private readonly OnlineConfigService _onlineConfigService;
         public MainWindowViewModel(
             IVciControl api,
             IControlUiService controlUiService,
             DataAggregator dataService,
-            IEnumerable<IFunction> allFunctions)  //容器注入的所有功能实现类实例的集合
+            IEnumerable<IFunction> allFunctions,
+            OnlineConfigService onlineConfigService)  //容器注入的所有功能实现类实例的集合
         {
             _data = dataService;
             _controlUiService = controlUiService;
             _api = api;
+            _onlineConfigService = onlineConfigService;
+
             _data.sysLogger.Information("加载 MainWindowViewModel");
             // 构造函数 尝试从Windows注册表自动加载J2534 DLL路径
             RegistryKey Key = Registry.LocalMachine.OpenSubKey(@"SOFTWARE\PassThruSupport.04.04\Eucleia Intelligent Tech Inc. - wiScan T6");
@@ -116,7 +122,7 @@ namespace EOLTest.ViewModels
             };
             var testVehicle = new Vehicle
             {
-                Vin = "LK6ADBE45TF321400",
+                Vin = "LK6ADAE24TE001063",
                 Vsn = "PU70000000",
                 CxName = "测试车型",
                 EcuModules = new ObservableCollection<EcuModule>(ecuList) // ← 显式转换
@@ -219,7 +225,7 @@ namespace EOLTest.ViewModels
             int maxLength = 17;
             try
             {
-                string vin = _currentVehicle.Vin?.ToUpper() ?? "";
+                string vin = CurrentVehicle.Vin?.ToUpper() ?? "";
 
                 // 如果为空，直接返回
                 if (string.IsNullOrEmpty(vin))
@@ -280,15 +286,15 @@ namespace EOLTest.ViewModels
                 // 处理失败情况
                 if (!isValid)
                 {
-                    _currentVehicle.Vin = "";
+                    CurrentVehicle.Vin = "";
                     _controlUiService.FocusVinTextBox();
                 }
 
                 // 长度超过17位 
-                if ((_currentVehicle.Vin?.Length ?? 0) > maxLength)
+                if ((CurrentVehicle.Vin?.Length ?? 0) > maxLength)
 
                 {
-                    _currentVehicle.Vin = "";
+                    CurrentVehicle.Vin = "";
                     _controlUiService.FocusVinTextBox();
                 }
             }
@@ -307,8 +313,8 @@ namespace EOLTest.ViewModels
             int Length = 10;
             try
             {
-                string vin = _currentVehicle.Vin?.ToUpper() ?? "";
-                string vsn = _currentVehicle.Vsn?.ToUpper() ?? "";
+                string vin = CurrentVehicle.Vin?.ToUpper() ?? "";
+                string vsn = CurrentVehicle.Vsn?.ToUpper() ?? "";
 
                 // 如果为空，直接返回
                 if (string.IsNullOrEmpty(vsn))
@@ -320,9 +326,9 @@ namespace EOLTest.ViewModels
                 bool isValid = true;
                 if (vsn.Length == Length && vin != "")
                 {
-                    _currentVehicle.CxName = await _data.carService.GetCarNameAsync(vsn.Substring(0, 4));
+                    CurrentVehicle.CxName = await _data.carService.GetCarNameAsync(vsn.Substring(0, 4));
 
-                    if (string.IsNullOrEmpty(_currentVehicle.CxName))
+                    if (string.IsNullOrEmpty(CurrentVehicle.CxName))
                     {
                         isValid = false;
                         //startClass.ShowMsgCaption("[ERROR]未找到品种代码", 2);
@@ -333,6 +339,7 @@ namespace EOLTest.ViewModels
                         _data.vehicleLogger = _data.loggerFactory.CreateVehicleLogger(vin);
                         try
                         {
+                            OnlineConfigLocalTestAsync();
                             await RunSomeTestAsync();
                             CurrentVehicle = new Vehicle();
                             return;                         // 直接退出，不执行后面所有校验
@@ -357,14 +364,14 @@ namespace EOLTest.ViewModels
                 // 处理失败情况
                 if (!isValid)
                 {
-                    _currentVehicle.Vsn = "";
+                    CurrentVehicle.Vsn = "";
                     _controlUiService.FocusVsnTextBox();
                 }
 
                 // 长度超过
-                if ((_currentVehicle.Vsn?.Length ?? 0) > Length)
+                if ((CurrentVehicle.Vsn?.Length ?? 0) > Length)
                 {
-                    _currentVehicle.Vsn = "";
+                    CurrentVehicle.Vsn = "";
                     _controlUiService.FocusVsnTextBox();
                 }
             }
@@ -430,7 +437,7 @@ namespace EOLTest.ViewModels
                             // ★ 自动切换到 DTC Tab（索引 2）
                             SelectedTabIndex = 2;
                             IsReadingDtc = true;
-                            dtcFunc.SetVehicle(_currentVehicle);
+                            dtcFunc.SetVehicle(CurrentVehicle);
                             bool success = await dtcFunc.ExecuteFunc();
 
                             // 更新绑定属性
@@ -487,5 +494,86 @@ namespace EOLTest.ViewModels
                 }
             }
         }
+
+        /// <summary>
+        /// 在线配置命令（可绑定到按钮或菜单）
+        /// </summary>
+        private async Task OnlineConfigAsync()
+        {
+            if (string.IsNullOrWhiteSpace(CurrentVehicle.Vin))
+            {
+                _data.logshow.AddLog("ERROR", "VIN 为空，无法进行在线配置");
+                return;
+            }
+
+            _data.logshow.AddLog("INFO", "▶ 开始在线配置...");
+            try
+            {
+                OnlineConfigResult result = await _onlineConfigService.ExecuteAsync(CurrentVehicle.Vin);
+
+                if (result.Success)
+                {
+                    CurrentVehicle = result.Vehicle;
+                    _data.logshow.AddLog("PASS",
+                        $"✅ 在线配置成功 | 车型:{result.Vehicle.CxName} | ECU数量:{result.Vehicle.EcuModules?.Count ?? 0}");
+                }
+                else
+                {
+                    string hint = result.ErrorType switch
+                    {
+                        HttpErrorType.Timeout => "（建议：检查服务器是否在线，或网络延迟是否过高）",
+                        HttpErrorType.NetworkError => "（建议：检查网线连接，或确认服务器IP是否正确）",
+                        HttpErrorType.HttpError => "（建议：联系管理员确认服务器状态）",
+                        HttpErrorType.ParseError => "（建议：确认服务器版本是否匹配）",
+                        _ => ""
+                    };
+
+                    _data.logshow.AddLog("FAIL", $"❌ 在线配置失败：{result.ErrorMessage}{hint}");
+                    _data.sysLogger.Error("[在线配置] 失败详情: {Detail}", result.ErrorDetail);
+                }
+            }
+            catch (Exception ex)
+            {
+                _data.logshow.AddLog("ERROR", $"❌ 在线配置异常：{ex.Message}");
+                _data.sysLogger.Error(ex, "[在线配置] 未预期异常");
+            }
+        }
+        /// <summary>
+        /// 本地在线配置测试命令（从本地 XML 文件解析，无需网络）
+        /// 文件路径：程序目录/Log/XmlSocket/{VIN}.xml
+        /// </summary>
+        private void OnlineConfigLocalTestAsync()
+        {
+            string vin = CurrentVehicle.Vin?.Trim().ToUpper();
+            if (string.IsNullOrEmpty(vin))
+            {
+                _data.logshow.AddLog("ERROR", "VIN 为空，无法进行本地测试");
+                return;
+            }
+            // 构建文件路径：程序目录/Log/XmlSocket/{vin}.xml
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string folder = Path.Combine(baseDir, "Log", "Xml");
+            string filePath = Path.Combine(folder, $"{vin}.xml");
+            if (!File.Exists(filePath))
+            {
+                _data.logshow.AddLog("FAIL", $"❌ 测试文件不存在: {filePath}");
+                return;
+            }
+            _data.logshow.AddLog("INFO", $"▶ 开始本地在线配置测试（文件: {filePath}）...");
+            // 调用 Service 的本地加载方法（同步方法，无需 await）
+            OnlineConfigResult result = _onlineConfigService.LoadLocalConfigFile(filePath, vin);
+            if (result.Success)
+            {
+                CurrentVehicle = result.Vehicle;
+                _data.logshow.AddLog("PASS",
+                    $"✅ 本地配置解析成功 | 车型:{result.Vehicle.CxName} | ECU数量:{result.Vehicle.EcuModules?.Count ?? 0}");
+            }
+            else
+            {
+                _data.logshow.AddLog("FAIL", $"❌ 本地配置解析失败：{result.ErrorMessage}");
+            }
+        }
+
+
     }
 }

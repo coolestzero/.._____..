@@ -117,6 +117,21 @@ namespace EOLTest
             services.AddSingleton<DataAggregator>();
             #endregion
 
+            #region Http TCP  相关
+            // ── 在线配置相关服务 ──
+            var onlineSettings = new OnlineConfigSettings
+            {
+                Factory = "FW"   // TODO: 从 appsettings.json 或数据库读取
+            };
+            services.AddSingleton(onlineSettings);
+
+            // HttpService 
+            services.AddSingleton<IHttpService, HttpService>();
+            // OnlineConfigService 
+            services.AddSingleton<OnlineConfigService>();
+            #endregion
+
+
             //注册VCI实例
             services.AddSingleton<APITester>();
             //services.AddSingleton<IVciControl, VciControlOuKe>();
