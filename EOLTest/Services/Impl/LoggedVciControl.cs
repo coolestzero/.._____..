@@ -21,8 +21,9 @@ namespace EOLTest.Services.Impl
         private readonly DataAggregator _data;
 
         // 78 pending 相关常量
-        private const int PendingWindowMs = 5000;   // ECU 承诺的"最多5秒"
-        private const int MaxPendingCount = 10;     // 防止死循环的安全阀
+        private const int PendingWindowMs = 5000;   // ECU 最多5秒
+        private const int InitialTimeoutMs = 1000;  // 未收到78时的初始超时（毫秒）
+        private const int MaxPendingCount = 6;     // 防止死循环的安全阀
 
         public LoggedVciControl(IVciControl inner, DataAggregator data)
         {
@@ -56,7 +57,7 @@ namespace EOLTest.Services.Impl
             return result;
         }
 
-        // ========== ★ 物理寻址 — 发送并等待最终响应（自动处理 78，支持重试） ==========
+        // ========== 物理寻址 — 发送并等待最终响应（自动处理 78，支持重试） ==========
         public async Task<ApiResult> SendAndWaitPhyAsync(string reqMsg,
                                                           uint overallTimeoutMs = 20000,
                                                           int maxRetries = 3,
@@ -85,13 +86,13 @@ namespace EOLTest.Services.Impl
                 if (sendToRecvDelayMs > 0)
                     await Task.Delay(sendToRecvDelayMs);
 
-                int pendingCount = 0;
-                DateTime? pendingSince = null;
-                var attemptSw = Stopwatch.StartNew();
+                int pendingCount = 0; // 连续收到 78 的次数（防死循环）
+                DateTime? pendingSince = null; // 最近一次收到 78 的时间（初始空白）
+                var attemptSw = Stopwatch.StartNew(); // 本轮尝试总计时 Stopwatch 是高精度计时器
 
-                while (attemptSw.ElapsedMilliseconds < overallTimeoutMs)
+                while (attemptSw.ElapsedMilliseconds < overallTimeoutMs) // 只要没有总超时
                 {
-                    var recvResult = await _inner.ReceiveAsync(); // 物理接收
+                    var recvResult = await _inner.ReceiveAsync(); // 物理接收 // 尝试收一帧（短超时，比如100ms）
 
                     if (recvResult.Success)
                     {
@@ -99,17 +100,17 @@ namespace EOLTest.Services.Impl
                         if (!string.IsNullOrEmpty(hex))
                             LogVehicle("接收", hex);
 
-                        if (IsPendingResponse(recvResult, requestSid))
+                        if (IsPendingResponse(recvResult, requestSid))   // 是 7F XX 78
                         {
                             pendingCount++;
-                            if (pendingCount > MaxPendingCount)
+                            if (pendingCount > MaxPendingCount)  // 78 次数太多 → 报错退出
                             {
                                 string errMsg = $"ECU连续回复78超过{MaxPendingCount}次，判定异常";
                                 _data.sysLogger?.Error(errMsg);
                                 return DiagnosticResult.Fail("PENDING_EXCEEDED", errMsg);
                             }
 
-                            pendingSince = DateTime.Now;
+                            pendingSince = DateTime.Now;  // 记下收到 78 的时间
                             _data.sysLogger?.Verbose($"收到第{pendingCount}次78 pending，等待最多{PendingWindowMs}ms...");
                             continue;
                         }
@@ -117,17 +118,25 @@ namespace EOLTest.Services.Impl
                         // 收到最终响应（肯定或非78否定）
                         return recvResult;
                     }
-                    else
+                    else  // 没收到任何数据（底层接收超时）
                     {
+                        // 初始超时检查 —— 从未收到过78，且总耗时已超过1秒
+                        if (pendingCount == 0 && attemptSw.ElapsedMilliseconds > InitialTimeoutMs)
+                        {
+                            _data.sysLogger?.Warning(
+                                $"初始超时（{InitialTimeoutMs}ms内未收到任何响应），退出本轮等待");
+                            break;
+                        }
+                        // pendingSince.HasValue表示有值 如果曾经收到过 78，但距离上次 78 已经超过 5 秒 → 退出本轮
                         if (pendingSince.HasValue &&
                             (DateTime.Now - pendingSince.Value).TotalMilliseconds > PendingWindowMs)
                         {
                             _data.sysLogger?.Warning($"收到78后{PendingWindowMs}ms内未收到回复，退出本轮等待");
                             break;
                         }
-                        await Task.Delay(30);
+                        await Task.Delay(30); // 还没到 5 秒，短暂休息后继续轮询
                     }
-                }
+                }  //while 循环结束
                 attemptSw.Stop();
 
                 if (attempt < maxRetries)
@@ -142,7 +151,7 @@ namespace EOLTest.Services.Impl
             return DiagnosticResult.Fail("TIMEOUT", timeoutMsg);
         }
 
-        // ========== ★ 功能寻址（单模块）— 发送并等待最终响应 ==========
+        // ==========  功能寻址（单模块）— 发送并等待最终响应 ==========
         public async Task<ApiResult> SendAndWaitFuncAsync(string reqMsg,
                                                            uint overallTimeoutMs = 20000,
                                                            int maxRetries = 3,
@@ -204,6 +213,13 @@ namespace EOLTest.Services.Impl
                     }
                     else
                     {
+                        // 初始超时检查 —— 从未收到过78，且总耗时已超过1秒
+                        if (pendingCount == 0 && attemptSw.ElapsedMilliseconds > InitialTimeoutMs)
+                        {
+                            _data.sysLogger?.Warning(
+                                $"初始超时（{InitialTimeoutMs}ms内未收到任何响应），退出本轮等待");
+                            break;
+                        }
                         if (pendingSince.HasValue &&
                             (DateTime.Now - pendingSince.Value).TotalMilliseconds > PendingWindowMs)
                         {
@@ -283,14 +299,14 @@ namespace EOLTest.Services.Impl
         {
             try
             {
-                if (string.IsNullOrWhiteSpace(hexData)) return 0;
-                string cleaned = hexData.Replace(" ", "").Replace("-", "");
-                if (cleaned.Length < 2) return 0;
-                return Convert.ToByte(cleaned.Substring(0, 2), 16);
+                if (string.IsNullOrWhiteSpace(hexData)) return 0;    // 空值返回0
+                string cleaned = hexData.Replace(" ", "").Replace("-", ""); // 去掉空格和短横线
+                if (cleaned.Length < 2) return 0;                    // 至少2个字符才有效
+                return Convert.ToByte(cleaned.Substring(0, 2), 16);  // 取前2字符，转16进制
             }
             catch
             {
-                return 0;
+                return 0;  // 解析异常返回0，由调用方判断无效
             }
         }
 
@@ -301,8 +317,8 @@ namespace EOLTest.Services.Impl
                 if (result?.Data == null) return false;
 
                 byte[] data = null;
-
-                if (result.Data is DiagnosticResponse diagResp)
+                //模式匹配语法（C# 7.0 引入），同时完成类型检查和变量创建，非常简洁
+                if (result.Data is DiagnosticResponse diagResp) //如果 result.Data 是 DiagnosticResponse 类型，则把它赋值给变量 diagResp，然后进入 if 代码块。
                     data = diagResp.Data;
                 else if (result.Data is List<DiagnosticResponse> diagList)
                 {
@@ -329,10 +345,15 @@ namespace EOLTest.Services.Impl
                 return false;
             }
         }
-
+        /// <summary>
+        /// 判断 报文是否包含7F 78，返回bool
+        /// </summary>
+        /// <param name="data"></param>
+        /// <param name="requestSid"></param>
+        /// <returns></returns>
         private bool Contains78Pattern(byte[] data, byte requestSid)
         {
-            for (int i = 0; i < data.Length - 2; i++)
+            for (int i = 0; i < data.Length - 2; i++) //遍历所有位置
             {
                 if (data[i] == 0x7F && data[i + 1] == requestSid && data[i + 2] == 0x78)
                     return true;
