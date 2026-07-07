@@ -18,6 +18,7 @@ namespace EOLTest.Services.Function
     {
         private readonly IVciControl _vci;
         private readonly DataAggregator _data;        // 数据相关
+        private readonly EcuConnector _ecuConnector;   // ECU 连接器（复用）
 
         public string FunctionName => "DTC";
 
@@ -31,6 +32,11 @@ namespace EOLTest.Services.Function
         {
             _vci = vci;
             _data = dataService;
+            _ecuConnector = new EcuConnector(
+                dataService.diagnostic,
+                vci,
+                dataService.logshow,
+                dataService.sysLogger);
         }
 
         /// <summary>
@@ -86,37 +92,20 @@ namespace EOLTest.Services.Function
             {
                 _data.sysLogger?.Information($"── 正在读取 {ecu.EcuName} 故障码 ──");
 
-                // 2a. 从数据库查询该 ECU 的 CAN 通信 ID
-                var ecuId = await _data.diagnostic.GetEcuCanIdAsync(ecu.EcuName);
-                if (ecuId == null)
+                //  查 CAN ID + 连接 ECU（通过 EcuConnector 复用）
+                var connResult = await _ecuConnector.ConnectToEcuAsync(ecu);
+                if (!connResult.Success)
                 {
-                    _data.sysLogger?.Warning($"⚠️ 未找到 {ecu.EcuName} 的 CAN ID，跳过");
                     DtcResults.Add(new EcuDtcResult
                     {
                         EcuName = ecu.EcuName,
                         Success = false,
-                        ErrorMessage = "未找到 CAN ID"
+                        ErrorMessage = connResult.ErrorMessage
                     });
                     allSuccess = false;
                     continue;
                 }
-
-                // 2b. 连接 ECU
-                result = await _vci.ConnectEcuAsync(ecuId.TxId, ecuId.RxId, ecuId.LinId);
-                if (!result.Success)
-                {
-                    _data.logshow.AddLog("FAIL", $"❌ 连接 {ecu.EcuName} 失败: {result.Message}");
-                    _data.sysLogger?.Error($"❌ 连接 {ecu.EcuName} 失败", result.Message);
-                    DtcResults.Add(new EcuDtcResult
-                    {
-                        EcuName = ecu.EcuName,
-                        Success = false,
-                        ErrorMessage = result.Message
-                    });
-                    allSuccess = false;
-                    continue;
-                }
-                _data.sysLogger?.Information($"✅ 已连接 {ecu.EcuName}，过滤器ID：{result.Data}");
+                uint filterId = (uint)connResult.ConnectResult.Data;
 
                 // 2c. 读取该 ECU 的 DTC（发送指令、接收、解析一体）  
                 var dtcResult = await ReadDtcFromSingleEcu(ecu.EcuName, "190208");
@@ -124,7 +113,7 @@ namespace EOLTest.Services.Function
                 if (!dtcResult.Success) allSuccess = false;
 
                 // 2d. 断开 ECU
-                await _vci.DisConnectEcuAsync((uint)result.Data);
+                await _vci.DisConnectEcuAsync(filterId);
             }
 
             // 3. 输出汇总
