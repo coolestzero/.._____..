@@ -118,7 +118,7 @@ namespace EOLTest.Services.Function
                 }
                 _data.sysLogger?.Information($"✅ 已连接 {ecu.EcuName}，过滤器ID：{result.Data}");
 
-                // 2c. 读取该 ECU 的 DTC（发送指令、接收、解析一体）
+                // 2c. 读取该 ECU 的 DTC（发送指令、接收、解析一体）  
                 var dtcResult = await ReadDtcFromSingleEcu(ecu.EcuName, "190208");
                 DtcResults.Add(dtcResult);
                 if (!dtcResult.Success) allSuccess = false;
