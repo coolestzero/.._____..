@@ -169,21 +169,43 @@ namespace EOLTest.Services.Impl
                     CxName = config.CarType ?? string.Empty,
                     Vsn = config.Vsn ?? string.Empty,
                 };
+
                 var ecuModules = new ObservableCollection<EcuModule>();
-                if (config.EcuList != null)
+                var moduleDict = new Dictionary<string, EcuModule>();
+                string[] pnsEntries = config.Pns.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (string entry in pnsEntries)
                 {
-                    foreach (var item in config.EcuList)
+                    // 按等号分割
+                    string[] parts = entry.Split(new[] { '=' }, StringSplitOptions.None);
+                    //判断等号两边数组长度是否为2，并且右边不为空
+                    if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1]))
                     {
-                        var module = new EcuModule
+                        string moduleName = parts[0].Trim();    //等号左边为模块名
+                        string partNumber = parts[1].Trim();    //等号右边为零件号
+                        moduleDict[moduleName] = new EcuModule
                         {
-                            EcuName = NormalizeEcuName(item.EcuName),
-                            PartNumber = item.PartNumber,
-                            OnlineConfig = item.Codes?.Data ?? string.Empty
+                            EcuName = moduleName,
+                            PartNumber = partNumber,
+                            OnlineConfig = string.Empty  
                         };
-                        ecuModules.Add(module);
+                    }
+
+                    if (config.EcuList != null)
+                    {
+                        foreach (var item in config.EcuList)
+                        {
+                            string ecuName = item.EcuName?.Trim();
+                            if (string.IsNullOrEmpty(ecuName)) continue;            // 检查是否为空
+
+                            if (moduleDict.TryGetValue(ecuName, out EcuModule module))  // 如果字典中存在该 ECU 模块就获取
+                            {
+                                // 获取 data 字符串
+                                module.OnlineConfig = item.Codes?.Data ?? string.Empty;
+                            }
+                        }
                     }
                 }
-                vehicle.EcuModules = ecuModules;
+                vehicle.EcuModules = new ObservableCollection<EcuModule>(moduleDict.Values);
                 return OnlineConfigResult.Ok(vehicle);
             }
             catch (InvalidOperationException ex)

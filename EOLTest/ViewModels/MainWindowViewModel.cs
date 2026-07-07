@@ -1,13 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
+﻿// Copyright (c) TBD 2026.
+
 using System.Collections.ObjectModel;
 using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Windows.Controls;
-using System.Windows.Markup;
-using System.Xml.Linq;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using EOLTest.API;
@@ -16,11 +10,8 @@ using EOLTest.Services;
 using EOLTest.Services.Aggregators;
 using EOLTest.Services.Function;
 using EOLTest.Services.Impl;
-using EOLTest.Services.Mdb;
 using EOLTest.Utils;
 using Microsoft.Win32;
-using Serilog;
-using Serilog.Core;
 
 namespace EOLTest.ViewModels
 {
@@ -302,7 +293,7 @@ namespace EOLTest.ViewModels
             {
                 _data.sysLogger.Error(ex, "VIN校验异常");
             }
-            
+
         }
         #endregion
 
@@ -379,7 +370,7 @@ namespace EOLTest.ViewModels
             {
                 _data.sysLogger.Error(ex, "VSN校验异常");
             }
-            
+
 
         }
         #endregion
@@ -474,7 +465,7 @@ namespace EOLTest.ViewModels
                     {
                         _data.logshow.AddLog("ERROR", $"❌ {funcName} 执行异常：{ex.Message}");
                     }
-                    
+
                 }
             }
             _data.logshow.AddLog("INFO", "========== 检测流程结束 ==========");
@@ -486,7 +477,7 @@ namespace EOLTest.ViewModels
                 if (_allFunctionMap.TryGetValue(functionName, out IFunction function))
                 {
 
-                    bool result =await function.ExecuteFunc();
+                    bool result = await function.ExecuteFunc();
                     _data.logshow.AddLog("INFO", "开始执行检测流程");
                     _data.logshow.AddLog("SEND", "发送扩展会话 10 03");
                     _data.logshow.AddLog("RECV", "收到正响应 50 03");
@@ -565,8 +556,16 @@ namespace EOLTest.ViewModels
             if (result.Success)
             {
                 CurrentVehicle = result.Vehicle;
+
+                string modulesInfo = "";
+                if (result.Vehicle.EcuModules != null && result.Vehicle.EcuModules.Any())
+                {
+                    modulesInfo = string.Join("; ", result.Vehicle.EcuModules
+                        .Select(m => $"{m.EcuName}:{m.OnlineConfig}"));
+                }
+
                 _data.logshow.AddLog("PASS",
-                    $"✅ 本地配置解析成功 | 车型:{result.Vehicle.CxName} | ECU数量:{result.Vehicle.EcuModules?.Count ?? 0}");
+                    $"✅ 本地配置解析成功 | 车型:{result.Vehicle.CxName} | ECU数量:{result.Vehicle.EcuModules?.Count ?? 0}| 模块配置: {modulesInfo}");
             }
             else
             {
