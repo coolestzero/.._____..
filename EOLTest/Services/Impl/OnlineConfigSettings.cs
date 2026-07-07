@@ -12,20 +12,14 @@ namespace EOLTest.Services.Impl
         /// <summary>工厂名称 -> (IP/域名, 端口) 映射表</summary>
         public Dictionary<string, (string ip, int port)> FactoryServers { get; set; } = new()
         {
-            ["LD"] = ("10.18.243.14", 8080),
-            ["LD2"] = ("10.18.243.14", 8080),
-            ["FW"] = ("hxzxpz.sgmw.com.cn", 8080),
-            ["FE"] = ("hxzxpz.sgmw.com.cn", 8080),
-            ["JAK1"] = ("10.140.16.6", 8080),
-            ["QD"] = ("10.42.243.24", 8080),
-            ["CQ"] = ("10.66.243.15", 8080)
+            ["FW"] = ("127.0.0.1", 8080),
         };
         public (string ip, int port) GetServerAddress()
         {
             if (FactoryServers.TryGetValue(Factory ?? "", out var addr))
                 return addr;
             // 默认回退地址
-            return ("10.18.243.14", 8080);
+            return ("127.0.0.1", 8080);
         }
     }
 }
